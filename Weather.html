@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Weather App — Single File</title>
+  <style>
+    :root{
+      --bg1:#0ea5e9; --bg2:#0369a1; --card: rgba(255,255,255,0.08);
+      --accent:#ffb020; --muted:rgba(255,255,255,0.85);
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:linear-gradient(135deg,var(--bg1),var(--bg2));
+      color:var(--muted);
+      padding:24px;
+    }
+    .card{
+      width:100%;
+      max-width:420px;
+      background:var(--card);
+      border-radius:14px;
+      padding:20px;
+      box-shadow:0 8px 30px rgba(0,0,0,0.25);
+      backdrop-filter: blur(6px);
+    }
+    h1{margin:0 0 12px;font-size:20px}
+    .controls{display:flex;gap:8px;margin-bottom:12px}
+    input[type="text"]{
+      flex:1;padding:10px 12px;border-radius:10px;border:0;outline:none;
+      background:rgba(255,255,255,0.06);color:inherit;font-size:15px;
+    }
+    button{
+      padding:10px 12px;border-radius:10px;border:0;background:var(--accent);
+      color:#111;font-weight:600;cursor:pointer;
+    }
+    button:disabled{opacity:0.6;cursor:default}
+    .row{display:flex;gap:8px;align-items:center}
+    .small{font-size:13px;opacity:0.95}
+    .weather {
+      margin-top:14px;
+      padding:12px;
+      border-radius:10px;
+      background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
+      display:none;
+    }
+    .loc{display:flex;align-items:center;gap:12px}
+    .temp{font-size:40px;font-weight:700;margin:6px 0}
+    .meta{display:flex;gap:10px;flex-wrap:wrap;font-size:14px}
+    .muted{opacity:0.9;font-size:13px}
+    .error{margin-top:12px;color:#ffdddd;background:rgba(255,0,0,0.12);padding:8px;border-radius:8px;display:none}
+    .hint{margin-top:12px;font-size:13px;opacity:0.9}
+    .icon img{width:68px;height:68px;display:block}
+    .footer{margin-top:12px;font-size:12px;opacity:0.9}
+    .spinner{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,0.18);border-top-color:var(--accent);animation:spin .8s linear infinite;display:inline-block;vertical-align:middle}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+  <div class="card" role="main">
+    <h1>🌤 Weather App</h1>
+
+    <div class="controls">
+      <input id="city" type="text" placeholder="Enter city (e.g. London)" aria-label="City name">
+      <button id="searchBtn">Get Weather</button>
+    </div>
+
+    <div class="row" style="margin-bottom:8px">
+      <button id="locBtn" style="flex:0 0 auto;background:#fff;color:#111;padding:8px 10px;border-radius:8px">Use my location</button>
+      <div style="margin-left:auto" class="small muted">
+        Units:
+        <label style="margin-left:6px">
+          <input type="radio" name="unit" value="metric" checked> °C
+        </label>
+        <label style="margin-left:6px">
+          <input type="radio" name="unit" value="imperial"> °F
+        </label>
+      </div>
+    </div>
+
+    <div id="status" class="small muted">Ready</div>
+
+    <div id="weather" class="weather" aria-live="polite">
+      <div class="loc">
+        <div class="icon" id="wIcon" aria-hidden="true"></div>
+        <div>
+          <div id="name" style="font-weight:700;font-size:16px"></div>
+          <div id="desc" class="muted small"></div>
+        </div>
+      </div>
+
+      <div class="temp" id="temp"></div>
+
+      <div class="meta">
+        <div id="feels" class="small muted"></div>
+        <div id="wind" class="small muted"></div>
+        <div id="hum" class="small muted"></div>
+        <div id="pressure" class="small muted"></div>
+      </div>
+
+      <div class="footer small muted" id="updated"></div>
+    </div>
+
+    <div id="error" class="error"></div>
+
+    <div id="hint" class="hint">
+      If you want live data: get a (free) OpenWeatherMap API key and paste it into the top of the script (see instructions below).
+      If the app doesn't fetch while opened from disk, run a local server:
+      <div style="margin-top:6px;font-size:13px">Example: <code>python -m http.server 8000</code> and open <code>http://localhost:8000/weather.html</code></div>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+    // ---------- CONFIGURE HERE ----------
+    // 1) Put your OpenWeatherMap API key below. If left empty, demo (fake) data will be shown.
+    const apiKey = ""; // <-- REPLACE with your API key (string), or leave empty for demo.
+    // ------------------------------------
+
+    const searchBtn = document.getElementById("searchBtn");
+    const cityInput = document.getElementById("city");
+    const weatherBox = document.getElementById("weather");
+    const wName = document.getElementById("name");
+    const wDesc = document.getElementById("desc");
+    const wTemp = document.getElementById("temp");
+    const wFeels = document.getElementById("feels");
+    const wWind = document.getElementById("wind");
+    const wHum = document.getElementById("hum");
+    const wPressure = document.getElementById("pressure");
+    const wIcon = document.getElementById("wIcon");
+    const status = document.getElementById("status");
+    const errorBox = document.getElementById("error");
+    const updated = document.getElementById("updated");
+    const locBtn = document.getElementById("locBtn");
+
+    function setStatus(text, loading=false) {
+      status.innerHTML = loading ? `<span class="spinner"></span> ${text}` : text;
+    }
+    function showError(msg) {
+      errorBox.style.display = "block";
+      errorBox.textContent = msg;
+    }
+    function clearError() {
+      errorBox.style.display = "none";
+      errorBox.textContent = "";
+    }
+
+    function getSelectedUnit() {
+      const r = document.querySelector('input[name="unit"]:checked');
+      return r ? r.value : "metric";
+    }
+
+    function showWeatherFromApi(data, units) {
+      // Adapted to OpenWeatherMap response shape
+      const name = `${data.name || "Unknown"}, ${data.sys?.country || ""}`.trim();
+      const desc = data.weather?.[0]?.description || "";
+      const temp = Math.round(data.main?.temp ?? NaN);
+      const feels = Math.round(data.main?.feels_like ?? NaN);
+      const wind = data.wind?.speed;
+      const hum = data.main?.humidity;
+      const pressure = data.main?.pressure;
+      const iconCode = data.weather?.[0]?.icon;
+
+      wName.textContent = name;
+      wDesc.textContent = desc.charAt(0).toUpperCase() + desc.slice(1);
+      wTemp.textContent = Number.isFinite(temp) ? `${temp}°${units === "metric" ? "C" : "F"}` : "--";
+      wFeels.textContent = Number.isFinite(feels) ? `Feels like ${feels}°` : "";
+      wWind.textContent = wind != null ? `Wind ${wind} ${units === "metric" ? "m/s" : "mph"}` : "";
+      wHum.textContent = hum != null ? `Humidity ${hum}%` : "";
+      wPressure.textContent = pressure != null ? `Pressure ${pressure} hPa` : "";
+
+      if (iconCode) {
+        const url = `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
+        wIcon.innerHTML = `<img src="${url}" alt="${desc}">`;
+      } else {
+        wIcon.innerHTML = "";
+      }
+
+      weatherBox.style.display = "block";
+      updated.textContent = `Last update: ${new Date((data.dt||Date.now())*1000).toLocaleString()}`;
+    }
+
+    function showDemo(city, units) {
+      // Demo dataset simulating OWM shape
+      const demo = {
+        name: city || "Demo City",
+        sys: { country: "DL" },
+        weather: [{ description: "clear sky", icon: "01d" }],
+        main: { temp: units === "metric" ? 26 : 79, feels_like: units === "metric" ? 25 : 77, humidity: 48, pressure: 1012 },
+        wind: { speed: units === "metric" ? 3 : 6.7 },
+        dt: Math.floor(Date.now()/1000)
+      };
+      showWeatherFromApi(demo, units);
+    }
+
+    async function fetchWeatherByCity(city) {
+      const units = getSelectedUnit();
+      clearError();
+      setStatus(`Fetching weather for "${city}"...`, true);
+      weatherBox.style.display = "none";
+
+      if (!apiKey) {
+        // demo mode
+        setTimeout(()=> {
+          setStatus("Demo mode (no API key) — showing fake data");
+          showDemo(city, units);
+        }, 600);
+        return;
+      }
+
+      const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${encodeURIComponent(apiKey)}&units=${units}`;
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          if (resp.status === 401) throw new Error("Invalid API key (401). Please check your key.");
+          if (resp.status === 404) throw new Error(`City "${city}" not found (404).`);
+          throw new Error(`HTTP ${resp.status} — ${resp.statusText}`);
+        }
+        const data = await resp.json();
+        showWeatherFromApi(data, units);
+        setStatus("Weather loaded");
+      } catch (err) {
+        // Provide helpful tips for common failure modes
+        const msg = err.message || String(err);
+        if (msg.toLowerCase().includes("failed to fetch") || msg.toLowerCase().includes("network")) {
+          showError(`Network or CORS error: ${msg}. If you opened the file from disk (file://) try running a local server (see hint).`);
+        } else {
+          showError(msg);
+        }
+        setStatus("Error");
+      }
+    }
+
+    async function fetchWeatherByCoords(lat, lon) {
+      const units = getSelectedUnit();
+      clearError();
+      setStatus(`Fetching weather for coordinates ${lat}, ${lon}...`, true);
+      weatherBox.style.display = "none";
+
+      if (!apiKey) {
+        // demo with "Nearby"
+        setTimeout(()=> {
+          setStatus("Demo mode (no API key) — showing fake data for current location");
+          showDemo("Current Location", units);
+        }, 600);
+        return;
+      }
+         const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${encodeURIComponent(apiKey)}&units=${units}`;
+
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          if (resp.status === 401) throw new Error("Invalid API key (401). Please check your key.");
+          throw new Error(`HTTP ${resp.status} — ${resp.statusText}`);
+        }
+        const data = await resp.json();
+        showWeatherFromApi(data, units);
+        setStatus("Weather loaded");
+      } catch (err) {
+        showError(err.message || String(err));
+        setStatus("Error");
+      }
+    }
+
+    // Events
+    searchBtn.addEventListener("click", () => {
+      const city = cityInput.value.trim();
+      if (!city) {
+        showError("Please enter a city name.");
+        return;
+      }
+      fetchWeatherByCity(city);
+    });
+
+    // Allow Enter key
+    cityInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { searchBtn.click(); }
+    });
+
+    locBtn.addEventListener("click", () => {
+      clearError();
+      setStatus("Getting your location...", true);
+      if (!navigator.geolocation) {
+        showError("Geolocation is not supported by this browser.");
+        setStatus("Ready");
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const { latitude, longitude } = pos.coords;
+          fetchWeatherByCoords(latitude, longitude);
+        },
+        err => {
+          showError(`Unable to get location: ${err.message}`);
+          setStatus("Ready");
+        },
+        { timeout:10000 }
+      );
+    });
+
+    // small UX: update units selection triggers refresh if there is a displayed city
+    document.querySelectorAll('input[name="unit"]').forEach(radio=>{
+      radio.addEventListener("change", ()=>{
+        // If weather is visible and has a name, try re-querying using current display name
+        const current = wName.textContent;
+        if (current) {
+          // extract the city part before comma
+          const city = current.split(",")[0];
+          if (city && city.trim()) fetchWeatherByCity(city.trim());
+        }
+      });
+    });
+
+    // show demo immediately if apiKey missing and user hasn't typed anything (optional)
+    if (!apiKey) {
+      setStatus("No API key set — demo mode");
+      showDemo("Demo City", getSelectedUnit());
+    } else {
+      setStatus("Ready (API key set)");
+    }
+  </script>
+</body>
+</html>
